@@ -1,0 +1,206 @@
+package pl.poznan.put.cs.si.puttalky
+ 
+import pl.poznan.put.cs.si.puttalky.Fakt;
+import pl.poznan.put.cs.si.puttalky.Zamowienie; 
+import pl.poznan.put.cs.si.puttalky.Ciasto;
+import pl.poznan.put.cs.si.puttalky.Dodatek;
+import pl.poznan.put.cs.si.puttalky.BazaWiedzy;
+import java.util.Set;
+import java.util.HashSet;
+
+
+/** Author: agalawrynowicz<br>
+ * Date: 19-Dec-2016 */
+
+rule "start"
+	salience 4
+	
+	when
+		not Fakt(nazwa=="start")
+		zamowienie : Zamowienie()
+	then
+		zamowienie.powitanie();
+		System.out.println();
+		System.out.println();
+		insert(new Fakt("start", "0"));
+end
+
+rule "Podaj pizze"
+	salience 3
+	when
+	    not Fakt(nazwa == "nie_pytaj_o_pizze")
+
+		pizza : Pizza()
+		parser : Parser()
+		baza : BazaWiedzy()
+	then
+		pizza.setMonit("Jaką chcesz pizzę? (nazwa/typ):\n");
+		pizza.zadajPytanie();
+		parser.przetworzOdpowiedz();
+
+
+		for (String slowo : parser.getSlowaKluczowe()){
+		//pizza typ
+		    if (slowo.equals("wegetariański") || slowo.equals("bez_mięso")){
+                        insert(new Fakt("chce_typ", "PizzaWegetariańska"));
+                        }
+            else if (slowo.equals("mięso")){ //pizza typ
+                        insert(new Fakt("chce_typ", "PizzaZMięsem"));
+                        }
+        //pizze nazwane
+            else if  (!slowo.equals("pizza")) {
+			    for (String uriKlasy : baza.dopasujPizze(slowo)) {
+			        if (!uriKlasy.equals("Nothing")){
+		                System.out.println("Wybrano pizzę o nazwie: " +uriKlasy);
+		                insert(new Fakt("pizza_propozycja", uriKlasy));
+		            }
+		         }
+		    }
+		}
+		insert(new Fakt("nie_pytaj_o_pizze", "0"));
+		update(pizza);
+end
+
+rule "sprawdz propozycje pizze po typie"
+    salience 3
+    when
+        $pizza_pref :Fakt(nazwa == "chce_typ")
+
+		baza: BazaWiedzy()
+		pizza: Pizza()
+	then
+		Set<String> pizze = baza.dopasujPizzePoTypie($pizza_pref.getWartosc());
+		System.out.println("Szukam "+$pizza_pref.getWartosc());
+        if (pizze.size()>1){
+			for (String nazwaPizzy : pizze) {
+		    	if (!nazwaPizzy.equals("Nothing")){
+		    	   insert(new Fakt("pizza_propozycja", nazwaPizzy));
+		       	   System.out.println("Polecam pizzę:"+nazwaPizzy);
+		       	}
+		    }
+		}
+		else {
+		    System.out.println("Nie ma żadnej pizzy typu: "+$pizza_pref.getWartosc());
+		}
+		retract($pizza_pref);
+
+end
+
+
+rule "Podaj dodatki"
+	salience 2
+	when
+	    not Fakt(nazwa == "pizza_propozycja")&&
+		not Fakt( nazwa =="dodatki_sprawdzone")
+
+		dodatek : Dodatek()
+		parser : Parser()
+		baza : BazaWiedzy()
+	then
+		dodatek.setMonit("Nie rozpoznano pizzy po nazwie ani typie. Jaki dodatek powinna zawierać Twoja pizza?:\n");
+		dodatek.zadajPytanie();
+		parser.przetworzOdpowiedz();
+
+		Set<String> zbior_dodatkow = new HashSet<String>();
+        Set<String> zbior_pizz;
+
+		for (String slowo : parser.getSlowaKluczowe()){
+			for (String uriKlasy : baza.dopasujDodatek(slowo)) {
+			    insert(new Fakt("dodatek", uriKlasy));
+		        zbior_dodatkow.add(uriKlasy);
+		    } 
+		}
+        if (zbior_dodatkow.size()>0){
+            zbior_pizz = baza.wyszukajPizzePoDodatkach(zbior_dodatkow);
+            System.out.println(zbior_pizz);
+            if (zbior_pizz.size()>1){
+                for (String piz : zbior_pizz){
+                        if (!piz.equals("Nothing")){
+                            insert(new Fakt("pizza_propozycja", piz));
+                            System.out.println("Polecam pizzę:" + piz);
+                        }
+                }
+            }
+            else {
+                insert(new Fakt("pizza_propozycja","Zamówienie specjalne"));
+                System.out.println("Proponuję zamówienie specjalne ze składnikami:");
+            }
+        }
+		insert(new Fakt("dodatki_sprawdzone", "0"));
+		update(dodatek);
+end
+
+rule "Brak dopasowania dodatków"
+    salience 3
+    when
+        Fakt( nazwa =="dodatki_sprawdzone") &&
+        not (Fakt( nazwa == "pizza_propozycja"))
+    then
+         System.out.println("Przykro mi, nie mamy takich dodatków.");
+end
+
+rule "Zamowienie specjalne"
+    salience 2
+    when
+        Fakt( nazwa == "pizza_propozycja", wartosc == "Zamówienie specjalne") &&
+        $dodatek : Fakt( nazwa == "dodatek")
+    then
+        System.out.println($dodatek.getWartosc());
+end
+
+rule "Podaj rodzaj ciasta"
+	salience 1
+	
+	when
+	    (Fakt( nazwa == "pizza_propozycja")) &&
+		not Fakt(nazwa == "rodzaj_ciasta") &&
+		not Fakt( nazwa =="ciasto_sprawdzone")
+
+		ciasto : Ciasto()
+		parser : Parser()
+	then
+		  ciasto.setMonit("Podaj rodzaj ciasta:\n");
+		  ciasto.zadajPytanie();
+		  parser.przetworzOdpowiedz();
+		 
+		for (String slowo : parser.getSlowaKluczowe()){
+			if (slowo.equals("cienki")){
+		       insert(new Fakt("rodzaj_ciasta", "cienkie"));
+			} else if (slowo.equals("grube")) {
+		       insert(new Fakt("rodzaj_ciasta", "grube"));
+			}
+		}
+		insert(new Fakt("ciasto_sprawdzone", "0"));
+		update(ciasto);
+end
+
+rule "Zatwierdz ciasto"
+salience 3
+    when
+        $ciasto: Fakt( nazwa == "rodzaj_ciasta")
+    then
+        System.out.println("Wybrano ciasto: "+ $ciasto.getWartosc());
+end
+
+rule "Brak dopasowania ciasta"
+    salience 3
+    when
+        not (Fakt( nazwa == "rodzaj_ciasta"))
+        Fakt( nazwa =="ciasto_sprawdzone")
+    then
+         System.out.println("Przykro mi, nie mamy takiego ciasta.");
+end
+
+
+rule "zakończenie"
+salience 0
+	when
+		not (Fakt(nazwa == "koniec")) &&
+		Fakt(nazwa == "pizza_propozycja") 
+
+		zamowienie : Zamowienie()
+	then
+		insert(new Fakt("koniec", "0"));
+		zamowienie.pozegnanie();
+end
+
